@@ -1,0 +1,49 @@
+# FraudStream-360
+
+[![CI](https://github.com/Siri20052003/FraudStream-360/actions/workflows/ci.yml/badge.svg)](https://github.com/Siri20052003/FraudStream-360/actions/workflows/ci.yml)
+
+FraudStream-360 is an original, production-oriented financial fraud intelligence project. It
+models the first milliseconds of a card decision: validate an incoming transaction, update
+account behavior state, calculate an explainable risk score, and route the payment to approve,
+review, or decline.
+
+## Current vertical slice
+
+- Deterministic synthetic transaction stream with card-testing, account-takeover,
+  impossible-travel, and merchant-abuse scenarios
+- Strict timezone, amount, channel, currency, identity, and geospatial validation
+- Stateful 10-minute velocity and spend windows
+- New-device, high-value, risky-merchant, and travel-speed signals
+- Auditable reason codes and bounded risk actions
+- JSON Lines output for downstream streaming and analytics work
+- Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
+
+## Quick start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+ruff check .
+pytest -q
+fraudstream --count 1000 --seed 360
+```
+
+The generated stream is written to `data/scored_transactions.jsonl`. Synthetic fraud labels are
+retained only for evaluation; the scorer never reads them when making a decision.
+
+## Design
+
+See the [architecture notes](docs/architecture.md) for the event and decision flow. The roadmap
+adds durable streaming transport, offline feature computation, model training, monitoring, and an
+investigator dashboard while preserving the contracts established here.
+
+## Data ethics
+
+All records are synthetic. No personal, banking, or cardholder data is used. Scenario labels are
+generated from explicit behavioral patterns rather than protected demographic attributes.
+
+## License
+
+MIT
+
