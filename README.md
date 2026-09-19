@@ -15,6 +15,7 @@ review, or decline.
 - Stateful 10-minute velocity and spend windows
 - New-device, high-value, risky-merchant, and travel-speed signals
 - Auditable reason codes and bounded risk actions
+- Streaming precision, recall, F1, alert-rate, confusion-matrix, and attack-pattern evaluation
 - JSON Lines output for downstream streaming and analytics work
 - Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
 
@@ -26,11 +27,16 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ruff check .
 pytest -q
-fraudstream --count 1000 --seed 360
+fraudstream --count 1000 --seed 360 \
+  --metrics-output data/evaluation.json
 ```
 
 The generated stream is written to `data/scored_transactions.jsonl`. Synthetic fraud labels are
 retained only for evaluation; the scorer never reads them when making a decision.
+
+The optional evaluation report treats both `review` and `decline` decisions as alerts by default
+(`--alert-threshold 40`). It reports operational workload alongside classification quality and
+breaks recall down by attack pattern, making blind spots visible before a policy is deployed.
 
 ## Design
 
@@ -46,4 +52,3 @@ generated from explicit behavioral patterns rather than protected demographic at
 ## License
 
 MIT
-
