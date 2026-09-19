@@ -10,6 +10,8 @@ flowchart LR
     D -->|70-100| G[Decline]
     C --> H[Explainability reason codes]
     E & F & G & H --> I[Scored JSONL event log]
+    C --> J[Threshold calibration]
+    J --> K[Capacity-constrained policy recommendation]
 ```
 
 The first vertical slice keeps transport concerns separate from fraud logic. Events enter a
@@ -22,3 +24,10 @@ replace the simulator without changing the scoring API.
 Every decision contains a bounded 0–100 score, an operational action, and machine-readable reason
 codes. This makes outcomes suitable for investigator queues, audit logs, and future dashboards.
 
+## Policy calibration
+
+Synthetic labels never enter the scoring path. After each independent score is produced, the
+calibrator updates confusion matrices for a fixed grid of candidate thresholds. The recommended
+operating point maximizes recall subject to an explicit maximum alert rate and optional precision
+floor. The exported candidate table preserves the trade-off curve for governance review instead
+of silently changing the live decision thresholds.

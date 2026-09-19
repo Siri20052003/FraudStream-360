@@ -19,6 +19,9 @@ jobs:
       - run: pytest -q
       - run: >-
           fraudstream --count 500 --seed 360 --output /tmp/scored.jsonl
-          --metrics-output /tmp/evaluation.json
+          --metrics-output /tmp/evaluation.json --calibration-output /tmp/calibration.json
       - run: test "$(wc -l < /tmp/scored.jsonl)" -eq 500
       - run: python -c 'import json; assert json.load(open("/tmp/evaluation.json"))["events"] == 500'
+      - run: >-
+          python -c 'import json; report=json.load(open("/tmp/calibration.json"));
+          assert report["selected"]["alert_rate"] <= report["max_alert_rate"]'
