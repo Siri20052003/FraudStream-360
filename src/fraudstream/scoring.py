@@ -18,10 +18,25 @@ class RiskDecision:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class RiskPolicy:
+    """Validated action thresholds that can be promoted after calibration."""
+
+    review_threshold: int = 40
+    decline_threshold: int = 70
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.review_threshold < self.decline_threshold <= 100:
+            raise ValueError(
+                "thresholds must satisfy 0 <= review_threshold < decline_threshold <= 100"
+            )
+
+
 class FraudScorer:
     """Scores transactions using account velocity, device, location, and merchant signals."""
 
-    def __init__(self) -> None:
+    def __init__(self, policy: RiskPolicy | None = None) -> None:
+        self.policy = policy or RiskPolicy()
         self._recent: dict[str, deque[TransactionEvent]] = defaultdict(deque)
         self._known_devices: dict[str, set[str]] = defaultdict(set)
         self._last_event: dict[str, TransactionEvent] = {}
@@ -66,7 +81,13 @@ class FraudScorer:
                 reasons.append("IMPOSSIBLE_TRAVEL")
 
         score = min(score, 100)
-        action = "decline" if score >= 70 else "review" if score >= 40 else "approve"
+        action = (
+            "decline"
+            if score >= self.policy.decline_threshold
+            else "review"
+            if score >= self.policy.review_threshold
+            else "approve"
+        )
         recent.append(event)
         self._known_devices[event.account_id].add(event.device_id)
         self._last_event[event.account_id] = event

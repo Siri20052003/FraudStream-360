@@ -17,6 +17,7 @@ review, or decline.
 - Auditable reason codes and bounded risk actions
 - Streaming precision, recall, F1, alert-rate, confusion-matrix, and attack-pattern evaluation
 - Capacity-aware threshold calibration with an auditable precision/recall operating table
+- Real-time FastAPI scoring with strict contracts, idempotent retries, and health probes
 - JSON Lines output for downstream streaming and analytics work
 - Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
 
@@ -33,6 +34,31 @@ fraudstream --count 1000 --seed 360 \
   --calibration-output data/calibration.json \
   --max-alert-rate 0.05
 ```
+
+Start the scoring service with the optional API dependencies:
+
+```bash
+pip install -e '.[api]'
+FRAUDSTREAM_REVIEW_THRESHOLD=40 FRAUDSTREAM_DECLINE_THRESHOLD=70 \
+  uvicorn fraudstream.api:app --host 0.0.0.0 --port 8000
+curl http://localhost:8000/health/ready
+```
+
+Or run the non-root, health-checked API container:
+
+```bash
+docker build -f Dockerfile.api -t fraudstream-api .
+docker run --rm -p 8000:8000 fraudstream-api
+```
+
+Interactive OpenAPI documentation is available at `http://localhost:8000/docs`. Submit a
+transaction to `POST /v1/transactions/score`; exact retries are served idempotently, while reuse
+of a transaction ID with changed data returns `409 Conflict`. Ground-truth fraud labels are not
+accepted by the public API, preventing evaluation data from leaking into live decisions.
+
+The in-memory scorer is intended for a single API worker because velocity and travel signals are
+stateful. The service serializes state transitions for safe concurrent requests and bounds its
+idempotency cache. A durable state store and partitioned event transport are the next scaling step.
 
 The generated stream is written to `data/scored_transactions.jsonl`. Synthetic fraud labels are
 retained only for evaluation; the scorer never reads them when making a decision.

@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from fraudstream.models import TransactionEvent
-from fraudstream.scoring import FraudScorer
+from fraudstream.scoring import FraudScorer, RiskPolicy
 
 
 def event(identifier: int, *, minutes: int = 0, **overrides: object) -> TransactionEvent:
@@ -40,3 +42,18 @@ def test_impossible_travel_is_explainable() -> None:
     decision = scorer.score(event(2, minutes=10, latitude=40.7128, longitude=-74.0060))
     assert decision.action == "review"
     assert "IMPOSSIBLE_TRAVEL" in decision.reasons
+
+
+def test_action_thresholds_follow_configured_policy() -> None:
+    scorer = FraudScorer(RiskPolicy(review_threshold=20, decline_threshold=50))
+    assert scorer.score(event(1, amount=1_000.0)).action == "review"
+    assert (
+        scorer.score(event(2, minutes=1, amount=1_000.0, merchant_id="merchant_risky_1")).action
+        == "decline"
+    )
+
+
+@pytest.mark.parametrize("thresholds", [(-1, 70), (70, 70), (80, 70), (40, 101)])
+def test_invalid_policy_thresholds_are_rejected(thresholds: tuple[int, int]) -> None:
+    with pytest.raises(ValueError, match="thresholds must satisfy"):
+        RiskPolicy(*thresholds)

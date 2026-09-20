@@ -2,8 +2,9 @@
 
 ```mermaid
 flowchart LR
-    A[Deterministic event simulator] --> B[Validated transaction contract]
-    B --> C[Stateful scoring engine]
+    A[Simulator or HTTP client] --> B[Validated transaction contract]
+    B --> L[Thread-safe idempotency service]
+    L --> C[Stateful scoring engine]
     C --> D{Risk policy}
     D -->|0-39| E[Approve]
     D -->|40-69| F[Manual review]
@@ -12,6 +13,8 @@ flowchart LR
     E & F & G & H --> I[Scored JSONL event log]
     C --> J[Threshold calibration]
     J --> K[Capacity-constrained policy recommendation]
+    E & F & G --> M[API response]
+    N[Health probes] --> L
 ```
 
 The first vertical slice keeps transport concerns separate from fraud logic. Events enter a
@@ -23,6 +26,15 @@ replace the simulator without changing the scoring API.
 
 Every decision contains a bounded 0–100 score, an operational action, and machine-readable reason
 codes. This makes outcomes suitable for investigator queues, audit logs, and future dashboards.
+
+## Service boundary
+
+`POST /v1/transactions/score` exposes the decision contract without accepting synthetic fraud
+labels. A bounded in-memory idempotency window returns the original decision for exact retries and
+rejects transaction IDs reused with different content. A lock makes each state transition atomic
+inside one worker. Liveness checks process availability; readiness also reports the active policy
+thresholds and number of unique events processed. Multi-worker deployment requires the planned
+partitioned transport and durable account-state store so one account's events remain ordered.
 
 ## Policy calibration
 
