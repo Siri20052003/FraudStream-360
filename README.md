@@ -18,6 +18,8 @@ review, or decline.
 - Streaming precision, recall, F1, alert-rate, confusion-matrix, and attack-pattern evaluation
 - Capacity-aware threshold calibration with an auditable precision/recall operating table
 - Real-time FastAPI scoring with strict contracts, idempotent retries, and health probes
+- Interactive investigator console with a prioritized queue, explainable risk signals,
+  channel mix, policy workload, and analyst filters
 - JSON Lines output for downstream streaming and analytics work
 - Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
 
@@ -51,6 +53,26 @@ docker build -f Dockerfile.api -t fraudstream-api .
 docker run --rm -p 8000:8000 fraudstream-api
 ```
 
+Launch the investigator console against a deterministic synthetic transaction scenario:
+
+```bash
+pip install -e '.[dashboard]'
+streamlit run src/fraudstream/dashboard.py
+```
+
+Or run its non-root, health-checked container:
+
+```bash
+docker build -f Dockerfile.dashboard -t fraudstream-dashboard .
+docker run --rm -p 8501:8501 fraudstream-dashboard
+```
+
+Open `http://localhost:8501` to tune review and decline thresholds, compare workload, inspect
+the risk-sorted alert queue, filter operational actions, and trace alerts to machine-readable
+decision signals. The console calls the same simulator and stateful scorer used by the CLI; it
+does not rely on hand-authored dashboard totals or expose synthetic ground-truth fraud labels to
+the investigator view.
+
 Interactive OpenAPI documentation is available at `http://localhost:8000/docs`. Submit a
 transaction to `POST /v1/transactions/score`; exact retries are served idempotently, while reuse
 of a transaction ID with changed data returns `409 Conflict`. Ground-truth fraud labels are not
@@ -77,8 +99,8 @@ quality requirement.
 ## Design
 
 See the [architecture notes](docs/architecture.md) for the event and decision flow. The roadmap
-adds durable streaming transport, offline feature computation, model training, monitoring, and an
-investigator dashboard while preserving the contracts established here.
+adds durable streaming transport, offline feature computation, model training, and monitoring
+while preserving the contracts established here.
 
 ## Data ethics
 

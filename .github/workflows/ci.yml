@@ -48,3 +48,5 @@ jobs:
           PY
       - name: Build scoring API image
         run: docker build --file Dockerfile.api --tag fraudstream-api:test .
+      - name: Build investigator dashboard image
+        run: docker build --file Dockerfile.dashboard --tag fraudstream-dashboard:test .

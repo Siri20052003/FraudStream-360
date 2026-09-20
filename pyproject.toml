@@ -16,7 +16,8 @@ fraudstream = "fraudstream.cli:main"
 
 [project.optional-dependencies]
 api = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
-dev = ["fastapi>=0.115,<1", "httpx>=0.27,<1", "pytest>=8.0", "ruff>=0.6", "uvicorn>=0.30,<1"]
+dashboard = ["streamlit>=1.39,<2"]
+dev = ["fastapi>=0.115,<1", "httpx>=0.27,<1", "pytest>=8.0", "ruff>=0.6", "streamlit>=1.39,<2", "uvicorn>=0.30,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fraudstream"]

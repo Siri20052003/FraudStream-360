@@ -15,6 +15,9 @@ flowchart LR
     J --> K[Capacity-constrained policy recommendation]
     E & F & G --> M[API response]
     N[Health probes] --> L
+    I --> O[Investigation snapshot]
+    O --> P[Prioritized alert queue]
+    O --> Q[Risk and workload views]
 ```
 
 The first vertical slice keeps transport concerns separate from fraud logic. Events enter a
@@ -35,6 +38,16 @@ rejects transaction IDs reused with different content. A lock makes each state t
 inside one worker. Liveness checks process availability; readiness also reports the active policy
 thresholds and number of unique events processed. Multi-worker deployment requires the planned
 partitioned transport and durable account-state store so one account's events remain ordered.
+
+## Investigator console
+
+The Streamlit console replays deterministic synthetic events through the production scoring
+path, then joins decisions to their source events in a read-only investigation model. Only
+`review` and `decline` outcomes enter the risk-sorted queue. Summary cards, signal rankings, and
+channel workload are calculated from that same snapshot, preventing disagreement between queue
+rows and executive totals. Analysts can filter actions and minimum scores without mutating the
+underlying decision order. Synthetic ground-truth labels remain outside the console so the demo
+matches the information boundary investigators would have in live operations.
 
 ## Policy calibration
 
