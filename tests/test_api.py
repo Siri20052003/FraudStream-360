@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import pytest
@@ -35,6 +36,44 @@ def test_health_endpoints_expose_policy_and_progress() -> None:
     assert ready["events_processed"] == 0
     assert ready["review_threshold"] == 35
     assert ready["decline_threshold"] == 80
+
+
+def test_readiness_fails_when_case_store_is_unavailable() -> None:
+    store = CaseStore()
+    client = TestClient(create_app(case_store=store))
+    store.close()
+
+    assert client.get("/health/live").status_code == 200
+    assert client.get("/health/ready").status_code == 503
+
+
+def test_metrics_and_correlation_id_capture_operational_outcomes() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/transactions/score",
+        json=payload(merchant_id="merchant_risky_9", amount=1_500.0),
+        headers={"X-Request-ID": "trace-api-test"},
+    )
+
+    assert response.headers["X-Request-ID"] == "trace-api-test"
+    metrics = client.get("/metrics").text
+    assert 'fraudstream_decisions_total{action="review"} 1' in metrics
+    assert 'route="/v1/transactions/score",status="200"} 1' in metrics
+
+
+def test_concurrent_exact_retries_produce_one_decision_and_one_case(tmp_path) -> None:
+    client = TestClient(create_app(case_store=CaseStore(tmp_path / "load-cases.db")))
+    request = payload(merchant_id="merchant_risky_9", amount=1_500.0)
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        responses = list(
+            pool.map(lambda _: client.post("/v1/transactions/score", json=request), range(40))
+        )
+
+    assert all(response.status_code == 200 for response in responses)
+    assert sum(not response.json()["idempotent_replay"] for response in responses) == 1
+    assert len(client.get("/v1/cases").json()) == 1
+    assert client.get("/health/ready").json()["events_processed"] == 1
 
 
 def test_scoring_contract_returns_explainable_decision() -> None:

@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Siri20052003/FraudStream-360/actions/workflows/ci.yml/badge.svg)](https://github.com/Siri20052003/FraudStream-360/actions/workflows/ci.yml)
 
+![FraudStream-360 platform overview](docs/assets/platform-overview.svg)
+
 FraudStream-360 is an original, production-oriented financial fraud intelligence project. It
 models the first milliseconds of a card decision: validate an incoming transaction, update
 account behavior state, calculate an explainable risk score, and route the payment to approve,
@@ -22,6 +24,9 @@ review, or decline.
   channel mix, policy workload, and analyst filters
 - Durable SQLite case management with automatic alert intake, priority-based SLAs, analyst
   assignment, controlled statuses, closure dispositions, and immutable audit history
+- Prometheus-compatible request, latency, and fraud-decision metrics at `/metrics`
+- Correlation IDs and structured JSON request logs for production troubleshooting
+- Repeatable concurrent HTTP load probe and retry-race reliability tests
 - JSON Lines output for downstream streaming and analytics work
 - Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
 
@@ -94,6 +99,21 @@ reopened. Critical, high, and standard cases receive 2-, 8-, and 24-hour SLAs re
 `FRAUDSTREAM_CASE_DB` to change the SQLite path. The API image defaults to `/app/data/cases.db`;
 mount `/app/data` as shown above to preserve cases across container replacements.
 
+Operational telemetry is exposed at `GET /metrics` in Prometheus text format. Every response
+includes an `X-Request-ID`; clients may supply one to correlate upstream and service logs, or the
+API creates one. Completion logs are JSON and include the stable route template, status, request
+ID, and duration. Readiness verifies the case database before accepting traffic.
+
+Run a repeatable load probe against the live API:
+
+```bash
+python scripts/load_test.py --requests 500 --concurrency 20
+```
+
+The report captures throughput, median/p95/max latency, and decision mix. CI exercises the same
+probe alongside a 40-way duplicate-delivery race that verifies exactly-once scoring and case
+creation behavior for idempotent retries.
+
 The in-memory scorer is intended for a single API worker because velocity and travel signals are
 stateful. The service serializes state transitions for safe concurrent requests and bounds its
 idempotency cache. Cases are durable, but scoring history is not yet shared across workers; a
@@ -115,9 +135,9 @@ quality requirement.
 
 ## Design
 
-See the [architecture notes](docs/architecture.md) for the event and decision flow. The roadmap
-adds durable streaming transport, offline feature computation, model training, and monitoring
-while preserving the contracts established here.
+See the [architecture notes](docs/architecture.md) for the event, decision, investigation, and
+observability flow. This recruiter-ready v1 demonstrates a complete synthetic-data vertical
+slice; the roadmap now moves to partitioned streaming transport and external feature state.
 
 ## Data ethics
 

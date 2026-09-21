@@ -272,6 +272,14 @@ class CaseStore:
         with self._lock:
             self._connection.close()
 
+    def ping(self) -> bool:
+        """Verify that the durable store can execute a query for readiness checks."""
+        try:
+            with self._locked_connection() as connection:
+                return connection.execute("SELECT 1").fetchone()[0] == 1
+        except sqlite3.Error:
+            return False
+
     def _get(self, connection: sqlite3.Connection, case_id: str) -> CaseRecord:
         row = connection.execute("SELECT * FROM cases WHERE case_id = ?", (case_id,)).fetchone()
         if row is None:

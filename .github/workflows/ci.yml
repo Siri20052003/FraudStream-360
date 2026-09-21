@@ -70,6 +70,8 @@ jobs:
               cases = json.load(response)
           assert len(cases) == 1 and cases[0]["status"] == "new"
           PY
+          python scripts/load_test.py --requests 100 --concurrency 10 > /tmp/load-report.json
+          python -c 'import json; report=json.load(open("/tmp/load-report.json")); assert report["requests"] == 100 and report["latency_ms"]["p95"] > 0'
       - name: Build scoring API image
         run: docker build --file Dockerfile.api --tag fraudstream-api:test .
       - name: Build investigator dashboard image

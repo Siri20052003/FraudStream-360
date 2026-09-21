@@ -22,6 +22,9 @@ flowchart LR
     R --> S[Assignment and workflow controls]
     S --> T[Disposition and SLA outcome]
     R & S & T --> U[Append-only audit history]
+    L --> V[Structured JSON logs]
+    L --> W[Prometheus metrics]
+    X[Readiness probe] --> R
 ```
 
 The first vertical slice keeps transport concerns separate from fraud logic. Events enter a
@@ -69,6 +72,19 @@ retrieval; audit events retain actor, timestamp, transition details, and analyst
 The default API container persists the database under `/app/data`. A mounted volume makes cases
 survive container replacement. SQLite is appropriate for this single-worker portfolio deployment;
 a multi-replica service would migrate the repository contract to a networked transactional store.
+
+## Observability and reliability
+
+HTTP middleware assigns or preserves a correlation ID, measures request duration, and records
+status counts against stable route templates so transaction and case identifiers do not create
+high-cardinality metric labels. `/metrics` exports request counters, decision counters, and a
+cumulative latency histogram in the Prometheus text exposition format. Decision counters exclude
+idempotent replays, keeping operational volumes aligned with unique scoring work.
+
+Each completed request produces one compact JSON log record with its correlation ID, method,
+route, status, and duration. Liveness tests the process boundary; readiness additionally queries
+the case store. The load probe drives concurrent unique events and reports throughput and latency,
+while the reliability suite races duplicate deliveries and asserts one score and one durable case.
 
 ## Policy calibration
 

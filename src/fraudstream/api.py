@@ -8,7 +8,7 @@ from datetime import datetime
 from threading import Lock
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from fraudstream.cases import (
@@ -22,6 +22,7 @@ from fraudstream.cases import (
 )
 from fraudstream.investigation import QueueItem
 from fraudstream.models import TransactionEvent
+from fraudstream.observability import ServiceMetrics, TelemetryMiddleware, service_logger
 from fraudstream.scoring import FraudScorer, RiskDecision, RiskPolicy
 
 
@@ -181,10 +182,16 @@ def create_app(*, policy: RiskPolicy | None = None, case_store: CaseStore | None
         decline_threshold=_integer_setting("FRAUDSTREAM_DECLINE_THRESHOLD", 70),
     )
     service = ScoringService(FraudScorer(selected_policy), case_store=case_store)
+    metrics = ServiceMetrics()
     app = FastAPI(
         title="FraudStream-360 Scoring API",
         version="0.1.0",
         description="Stateful, explainable payment-risk decisions for validated events.",
+    )
+    app.add_middleware(
+        TelemetryMiddleware,
+        metrics=metrics,
+        logger=service_logger(),
     )
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
@@ -193,6 +200,8 @@ def create_app(*, policy: RiskPolicy | None = None, case_store: CaseStore | None
 
     @app.get("/health/ready", response_model=HealthResponse, tags=["health"])
     def readiness() -> HealthResponse:
+        if not service.case_store.ping():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
         return HealthResponse(
             status="ready",
             service="fraudstream-360",
@@ -234,6 +243,8 @@ def create_app(*, policy: RiskPolicy | None = None, case_store: CaseStore | None
                 )
             )
             case_id = case.case_id
+        if not replay:
+            metrics.observe_decision(decision.action)
         return ScoreResponse(
             transaction_id=decision.transaction_id,
             risk_score=decision.score,
@@ -297,6 +308,10 @@ def create_app(*, policy: RiskPolicy | None = None, case_store: CaseStore | None
         except CaseNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
         return [CaseEventResponse.from_event(event) for event in events]
+
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics() -> Response:
+        return Response(metrics.render(), media_type="text/plain; version=0.0.4")
 
     return app
 
