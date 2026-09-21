@@ -45,6 +45,30 @@ jobs:
                   if attempt == 19:
                       raise
                   time.sleep(0.25)
+
+          request = urllib.request.Request(
+              "http://127.0.0.1:8000/v1/transactions/score",
+              data=json.dumps({
+                  "transaction_id": "ci_alert_1",
+                  "account_id": "ci_account_1",
+                  "merchant_id": "merchant_risky_ci",
+                  "occurred_at": "2026-09-21T13:00:00Z",
+                  "amount": 1500,
+                  "currency": "USD",
+                  "channel": "ecommerce",
+                  "latitude": 30.2672,
+                  "longitude": -97.7431,
+                  "device_id": "ci_device_1"
+              }).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request) as response:
+              decision = json.load(response)
+          assert decision["case_id"] == "case_ci_alert_1"
+          with urllib.request.urlopen("http://127.0.0.1:8000/v1/cases") as response:
+              cases = json.load(response)
+          assert len(cases) == 1 and cases[0]["status"] == "new"
           PY
       - name: Build scoring API image
         run: docker build --file Dockerfile.api --tag fraudstream-api:test .

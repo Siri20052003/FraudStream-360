@@ -20,6 +20,8 @@ review, or decline.
 - Real-time FastAPI scoring with strict contracts, idempotent retries, and health probes
 - Interactive investigator console with a prioritized queue, explainable risk signals,
   channel mix, policy workload, and analyst filters
+- Durable SQLite case management with automatic alert intake, priority-based SLAs, analyst
+  assignment, controlled statuses, closure dispositions, and immutable audit history
 - JSON Lines output for downstream streaming and analytics work
 - Automated tests, linting, Docker packaging, and GitHub Actions smoke validation
 
@@ -50,7 +52,7 @@ Or run the non-root, health-checked API container:
 
 ```bash
 docker build -f Dockerfile.api -t fraudstream-api .
-docker run --rm -p 8000:8000 fraudstream-api
+docker run --rm -p 8000:8000 -v fraudstream-cases:/app/data fraudstream-api
 ```
 
 Launch the investigator console against a deterministic synthetic transaction scenario:
@@ -78,9 +80,24 @@ transaction to `POST /v1/transactions/score`; exact retries are served idempoten
 of a transaction ID with changed data returns `409 Conflict`. Ground-truth fraud labels are not
 accepted by the public API, preventing evaluation data from leaking into live decisions.
 
+Every `review` or `decline` decision automatically opens one durable case per transaction. Use
+`GET /v1/cases` to retrieve the SLA-prioritized queue, optionally filtered by `case_status` or
+`assigned_to`. The investigation workflow is available through:
+
+- `PATCH /v1/cases/{case_id}/assignment` for explicit analyst ownership
+- `PATCH /v1/cases/{case_id}/status` for validated state transitions and final disposition
+- `GET /v1/cases/{case_id}/history` for the chronological, append-only audit trail
+
+Cases follow `new → in_progress → pending_information → in_progress` or may close from any active
+state. Closure requires one of the supported dispositions; closed cases cannot be reassigned or
+reopened. Critical, high, and standard cases receive 2-, 8-, and 24-hour SLAs respectively. Set
+`FRAUDSTREAM_CASE_DB` to change the SQLite path. The API image defaults to `/app/data/cases.db`;
+mount `/app/data` as shown above to preserve cases across container replacements.
+
 The in-memory scorer is intended for a single API worker because velocity and travel signals are
 stateful. The service serializes state transitions for safe concurrent requests and bounds its
-idempotency cache. A durable state store and partitioned event transport are the next scaling step.
+idempotency cache. Cases are durable, but scoring history is not yet shared across workers; a
+partitioned event transport and external feature-state store are the next scaling step.
 
 The generated stream is written to `data/scored_transactions.jsonl`. Synthetic fraud labels are
 retained only for evaluation; the scorer never reads them when making a decision.

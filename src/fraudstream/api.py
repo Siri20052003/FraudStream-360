@@ -11,6 +11,16 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from fraudstream.cases import (
+    CaseEvent,
+    CaseNotFoundError,
+    CaseRecord,
+    CaseStatus,
+    CaseStore,
+    Disposition,
+    InvalidCaseTransitionError,
+)
+from fraudstream.investigation import QueueItem
 from fraudstream.models import TransactionEvent
 from fraudstream.scoring import FraudScorer, RiskDecision, RiskPolicy
 
@@ -41,6 +51,68 @@ class ScoreResponse(BaseModel):
     action: Literal["approve", "review", "decline"]
     reasons: list[str]
     idempotent_replay: bool = False
+    case_id: str | None = None
+
+
+class CaseResponse(BaseModel):
+    case_id: str
+    transaction_id: str
+    priority: str
+    risk_score: int
+    action: str
+    amount: float
+    reasons: list[str]
+    status: CaseStatus
+    assigned_to: str | None
+    disposition: Disposition | None
+    opened_at: datetime
+    due_at: datetime
+    updated_at: datetime
+    closed_at: datetime | None
+    sla_state: Literal["on_track", "breached", "met"]
+
+    @classmethod
+    def from_record(cls, record: CaseRecord) -> CaseResponse:
+        return cls(
+            **{
+                **{
+                    field: getattr(record, field)
+                    for field in cls.model_fields
+                    if field != "sla_state"
+                },
+                "reasons": list(record.reasons),
+                "sla_state": record.sla_state(),
+            }
+        )
+
+
+class AssignmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    assigned_to: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
+
+
+class TransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: CaseStatus
+    actor: str = Field(min_length=1, max_length=128)
+    disposition: Disposition | None = None
+    note: str | None = Field(default=None, max_length=1_000)
+
+
+class CaseEventResponse(BaseModel):
+    event_id: int
+    case_id: str
+    event_type: str
+    actor: str
+    occurred_at: datetime
+    details: dict[str, object]
+
+    @classmethod
+    def from_event(cls, event: CaseEvent) -> CaseEventResponse:
+        return cls(**{field: getattr(event, field) for field in cls.model_fields})
 
 
 class HealthResponse(BaseModel):
@@ -59,10 +131,17 @@ class DuplicateTransactionError(ValueError):
 class ScoringService:
     """Serialize state transitions and retain a bounded idempotency window."""
 
-    def __init__(self, scorer: FraudScorer, *, idempotency_capacity: int = 10_000) -> None:
+    def __init__(
+        self,
+        scorer: FraudScorer,
+        *,
+        case_store: CaseStore | None = None,
+        idempotency_capacity: int = 10_000,
+    ) -> None:
         if idempotency_capacity < 1:
             raise ValueError("idempotency_capacity must be positive")
         self.scorer = scorer
+        self.case_store = case_store or CaseStore()
         self._capacity = idempotency_capacity
         self._results: OrderedDict[str, tuple[ScoreRequest, RiskDecision]] = OrderedDict()
         self._lock = Lock()
@@ -96,12 +175,12 @@ def _integer_setting(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from error
 
 
-def create_app(*, policy: RiskPolicy | None = None) -> FastAPI:
+def create_app(*, policy: RiskPolicy | None = None, case_store: CaseStore | None = None) -> FastAPI:
     selected_policy = policy or RiskPolicy(
         review_threshold=_integer_setting("FRAUDSTREAM_REVIEW_THRESHOLD", 40),
         decline_threshold=_integer_setting("FRAUDSTREAM_DECLINE_THRESHOLD", 70),
     )
-    service = ScoringService(FraudScorer(selected_policy))
+    service = ScoringService(FraudScorer(selected_policy), case_store=case_store)
     app = FastAPI(
         title="FraudStream-360 Scoring API",
         version="0.1.0",
@@ -138,15 +217,88 @@ def create_app(*, policy: RiskPolicy | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
             ) from error
+        case_id = None
+        if decision.action != "approve":
+            event = request.to_event()
+            case = service.case_store.create_from_alert(
+                QueueItem(
+                    transaction_id=event.transaction_id,
+                    occurred_at=event.occurred_at,
+                    account_id=event.account_id,
+                    merchant_id=event.merchant_id,
+                    amount=event.amount,
+                    channel=event.channel,
+                    risk_score=decision.score,
+                    action=decision.action,
+                    reasons=decision.reasons,
+                )
+            )
+            case_id = case.case_id
         return ScoreResponse(
             transaction_id=decision.transaction_id,
             risk_score=decision.score,
             action=decision.action,
             reasons=list(decision.reasons),
             idempotent_replay=replay,
+            case_id=case_id,
         )
+
+    @app.get("/v1/cases", response_model=list[CaseResponse], tags=["investigations"])
+    def list_cases(
+        case_status: CaseStatus | None = None, assigned_to: str | None = None
+    ) -> list[CaseResponse]:
+        return [
+            CaseResponse.from_record(case)
+            for case in service.case_store.list_cases(status=case_status, assigned_to=assigned_to)
+        ]
+
+    @app.patch(
+        "/v1/cases/{case_id}/assignment",
+        response_model=CaseResponse,
+        tags=["investigations"],
+    )
+    def assign_case(case_id: str, request: AssignmentRequest) -> CaseResponse:
+        try:
+            case = service.case_store.assign(case_id, request.assigned_to, actor=request.actor)
+        except CaseNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        except (InvalidCaseTransitionError, ValueError) as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        return CaseResponse.from_record(case)
+
+    @app.patch(
+        "/v1/cases/{case_id}/status",
+        response_model=CaseResponse,
+        tags=["investigations"],
+    )
+    def transition_case(case_id: str, request: TransitionRequest) -> CaseResponse:
+        try:
+            case = service.case_store.transition(
+                case_id,
+                request.status,
+                actor=request.actor,
+                disposition=request.disposition,
+                note=request.note,
+            )
+        except CaseNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        except InvalidCaseTransitionError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        return CaseResponse.from_record(case)
+
+    @app.get(
+        "/v1/cases/{case_id}/history",
+        response_model=list[CaseEventResponse],
+        tags=["investigations"],
+    )
+    def case_history(case_id: str) -> list[CaseEventResponse]:
+        try:
+            events = service.case_store.history(case_id)
+        except CaseNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        return [CaseEventResponse.from_event(event) for event in events]
 
     return app
 
 
-app = create_app()
+app = create_app(case_store=CaseStore(os.getenv("FRAUDSTREAM_CASE_DB", "data/cases.db")))

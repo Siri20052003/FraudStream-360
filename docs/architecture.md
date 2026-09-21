@@ -18,6 +18,10 @@ flowchart LR
     I --> O[Investigation snapshot]
     O --> P[Prioritized alert queue]
     O --> Q[Risk and workload views]
+    F & G --> R[Durable case intake]
+    R --> S[Assignment and workflow controls]
+    S --> T[Disposition and SLA outcome]
+    R & S & T --> U[Append-only audit history]
 ```
 
 The first vertical slice keeps transport concerns separate from fraud logic. Events enter a
@@ -48,6 +52,23 @@ channel workload are calculated from that same snapshot, preventing disagreement
 rows and executive totals. Analysts can filter actions and minimum scores without mutating the
 underlying decision order. Synthetic ground-truth labels remain outside the console so the demo
 matches the information boundary investigators would have in live operations.
+
+## Case management
+
+Non-approval decisions are converted to cases through the same validated transaction and decision
+objects used by the scorer. A unique transaction constraint makes alert intake idempotent, so an
+API retry cannot create duplicate investigator work. SQLite transactions serialize each case
+mutation and atomically append its audit event.
+
+The workflow explicitly permits only operationally meaningful transitions. Closing requires a
+disposition, and closed cases cannot be reassigned or reopened. Priority determines the SLA at
+intake (critical: 2 hours, high: 8 hours, standard: 24 hours), while the API computes current or
+final SLA state from persisted timestamps. Queue indexes support status, due-time, and risk-based
+retrieval; audit events retain actor, timestamp, transition details, and analyst notes.
+
+The default API container persists the database under `/app/data`. A mounted volume makes cases
+survive container replacement. SQLite is appropriate for this single-worker portfolio deployment;
+a multi-replica service would migrate the repository contract to a networked transactional store.
 
 ## Policy calibration
 
